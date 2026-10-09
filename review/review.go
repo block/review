@@ -101,7 +101,7 @@ func Run(ctx context.Context, cfg Config, opts Options) (*Result, error) {
 	}
 	rev, kept, err := parseReview(out, cfg.RepoDir)
 	if err != nil {
-		return res, fmt.Errorf("review: coordinator output: %w", err)
+		return res, fmt.Errorf("review: coordinator output: %w: %q", err, tail(out, 500))
 	}
 	res.OverallCorrectness, res.OverallExplanation, res.ReviewProcess = rev.OverallCorrectness, rev.OverallExplanation, rev.ReviewProcess
 	if rev.DroppedCandidates != nil {
