@@ -29,4 +29,7 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository }}:${{ github.ref_name }}
             ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
-      - run: echo "ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
+      - env:
+          REPOSITORY: ${{ github.repository }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: echo "ghcr.io/${REPOSITORY}@${DIGEST}" >> "$GITHUB_STEP_SUMMARY"
