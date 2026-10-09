@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/block/review-panel/review"
+	"github.com/block/review/review"
 )
 
 func main() {
