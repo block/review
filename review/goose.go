@@ -105,7 +105,7 @@ func (r GooseRunner) Run(ctx context.Context, pass Pass) (string, error) {
 			return "", err
 		}
 	} else {
-		dir, err := os.MkdirTemp("", "review-panel-goose-")
+		dir, err := os.MkdirTemp("", "review-goose-")
 		if err != nil {
 			return "", err
 		}
