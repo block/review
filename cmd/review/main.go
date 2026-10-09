@@ -1,7 +1,7 @@
-// Command review-panel reviews a git revision range with a Goose review panel.
+// Command review reviews a git revision range with a Goose review panel.
 //
-//	review-panel review --base main            review HEAD against main
-//	review-panel reviewbench                   run under the ReviewBench agent contract
+//	review review --base main            review HEAD against main
+//	review reviewbench                   run under the ReviewBench agent contract
 package main
 
 import (
@@ -34,13 +34,13 @@ func main() {
 		usage()
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "review-panel:", err)
+		fmt.Fprintln(os.Stderr, "review:", err)
 		os.Exit(1)
 	}
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: review-panel review --base <rev> [flags] | review-panel reviewbench")
+	fmt.Fprintln(os.Stderr, "usage: review review --base <rev> [flags] | review reviewbench")
 	os.Exit(2)
 }
 
@@ -87,7 +87,7 @@ func reviewCmd(ctx context.Context, args []string) error {
 }
 
 func logPass(p review.PassReport) {
-	msg := fmt.Sprintf("review-panel: %s %s in %s", p.Role, p.Status, p.Duration.Round(time.Second))
+	msg := fmt.Sprintf("review: %s %s in %s", p.Role, p.Status, p.Duration.Round(time.Second))
 	if p.Error != "" {
 		msg += ": " + firstLine(p.Error)
 	}
@@ -110,7 +110,7 @@ func reviewBenchCmd(ctx context.Context) error {
 			return fmt.Errorf("missing %s", k)
 		}
 	}
-	agent := orDefault(env("RB_AGENT"), "review-panel")
+	agent := orDefault(env("RB_AGENT"), "review")
 	repo := orDefault(env("RB_REPO"), "/work/repo")
 	intent := ""
 	if raw, err := os.ReadFile(orDefault(env("RB_PR_JSON"), "/work/pr/pr.json")); err == nil {
@@ -121,11 +121,11 @@ func reviewBenchCmd(ctx context.Context) error {
 	}
 	provider := orDefault(env("RB_CONFIG_PROVIDER"), "openai")
 	goose := review.GooseConfig{
-		Bin:      env("REVIEW_PANEL_GOOSE_BIN"),
+		Bin:      env("REVIEW_GOOSE_BIN"),
 		Provider: provider,
 		Model:    orDefault(env("RB_CONFIG_MODEL"), "gpt-5.6-sol"),
 		Effort:   orDefault(env("RB_CONFIG_EFFORT"), "high"),
-		StateDir: env("REVIEW_PANEL_STATE_DIR"),
+		StateDir: env("REVIEW_STATE_DIR"),
 	}
 	if provider == "openai" {
 		baseURL := orDefault(env("RB_MODEL_BASE_URL"), "https://api.openai.com/v1")
@@ -143,8 +143,8 @@ func reviewBenchCmd(ctx context.Context) error {
 		JudgeReserve:       2*time.Minute + 30*time.Second,
 	}
 	for name, d := range map[string]*time.Duration{
-		"REVIEW_PANEL_PANELIST_TIMEOUT": &cfg.PanelistTimeout, "REVIEW_PANEL_COORDINATOR_TIMEOUT": &cfg.CoordinatorTimeout,
-		"REVIEW_PANEL_JUDGE_TIMEOUT": &cfg.JudgeTimeout, "REVIEW_PANEL_BUDGET": &cfg.Budget, "REVIEW_PANEL_JUDGE_RESERVE": &cfg.JudgeReserve,
+		"REVIEW_PANELIST_TIMEOUT": &cfg.PanelistTimeout, "REVIEW_COORDINATOR_TIMEOUT": &cfg.CoordinatorTimeout,
+		"REVIEW_JUDGE_TIMEOUT": &cfg.JudgeTimeout, "REVIEW_BUDGET": &cfg.Budget, "REVIEW_JUDGE_RESERVE": &cfg.JudgeReserve,
 	} {
 		if v := env(name); v != "" {
 			parsed, err := time.ParseDuration(v)
@@ -157,11 +157,11 @@ func reviewBenchCmd(ctx context.Context) error {
 	if env("RB_CONFIG_GATE") == "off" {
 		cfg.Gate = review.NoGate
 	}
-	fmt.Fprintf(os.Stderr, "review-panel: provider=%s model=%s effort=%s gate=%s role_models=%s role_efforts=%s\n",
+	fmt.Fprintf(os.Stderr, "review: provider=%s model=%s effort=%s gate=%s role_models=%s role_efforts=%s\n",
 		provider, goose.Model, goose.Effort, orDefault(env("RB_CONFIG_GATE"), "on"), env("RB_CONFIG_ROLE_MODELS"), env("RB_CONFIG_ROLE_EFFORTS"))
 
 	res, err := review.Run(ctx, cfg, review.Options{OnPass: logPass})
-	if path := env("REVIEW_PANEL_RESULT"); path != "" && res != nil {
+	if path := env("REVIEW_RESULT"); path != "" && res != nil {
 		if payload, err := json.MarshalIndent(res, "", "  "); err == nil {
 			os.WriteFile(path, payload, 0o644)
 		}
@@ -197,7 +197,7 @@ func reviewBenchCmd(ctx context.Context) error {
 			restored++
 		}
 	}
-	fmt.Fprintf(os.Stderr, "review-panel: %d finding(s) reported, %d returned (%d restored by the judge), %d dropped by the coordinator\n",
+	fmt.Fprintf(os.Stderr, "review: %d finding(s) reported, %d returned (%d restored by the judge), %d dropped by the coordinator\n",
 		len(res.Findings), len(res.Ungated), restored, len(res.Dropped))
 	return os.WriteFile(env("RB_OUT"), payload, 0o644)
 }

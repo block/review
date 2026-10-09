@@ -1,4 +1,4 @@
-# review-panel
+# review
 
 An LLM code reviewer for git changes, built on [Goose](https://github.com/aaif-goose/goose). Every review runs the same pipeline:
 
@@ -25,13 +25,13 @@ If a panelist fails, the coordinator covers its lens and the review is marked de
 ## Usage
 
 ```sh
-go install github.com/block/review/cmd/review-panel@latest
+go install github.com/block/review/cmd/review@latest
 
 # Review the current branch against main with Goose's configured provider and model.
-review-panel review --base main
+review review --base main
 
 # A different model per pass, every finding regardless of the gate, as JSON.
-review-panel review --base main --provider openai \
+review review --base main --provider openai \
   --role-models behavior_state_data=model-a,failure_concurrency_lifecycle=model-b,security_contracts=model-c,coordinator=model-a,judge=model-b \
   --role-efforts behavior_state_data=medium,coordinator=medium \
   --all --json
@@ -62,8 +62,8 @@ res, err := review.Run(ctx, review.Config{
 The image implements the [ReviewBench agent contract](https://github.com/review-bench/ReviewBench/blob/main/AGENT_CONTRACT.md):
 
 ```sh
-docker build --platform linux/amd64 -t review-panel .
-scripts/try-agent.sh review-panel --pr 0 -e OPENAI_API_KEY   # from a ReviewBench checkout
+docker build --platform linux/amd64 -t review .
+scripts/try-agent.sh review --pr 0 -e OPENAI_API_KEY   # from a ReviewBench checkout
 ```
 
 | Setting | Values | Default |

@@ -1,4 +1,4 @@
-# review-panel under the ReviewBench agent contract:
+# review under the ReviewBench agent contract:
 # https://github.com/review-bench/ReviewBench/blob/main/AGENT_CONTRACT.md
 #
 # Credentials come from the run, never the image: OPENAI_API_KEY for the
@@ -9,7 +9,7 @@
 FROM golang:1.26 AS build
 WORKDIR /src
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -o /review-panel ./cmd/review-panel
+RUN CGO_ENABLED=0 go build -trimpath -o /review ./cmd/review
 
 FROM debian:bookworm-slim
 ARG GOOSE_VERSION=1.43.0
@@ -21,5 +21,5 @@ RUN apt-get update \
     && tar -xzf /tmp/goose.tgz -C /usr/local/bin ./goose \
     && rm /tmp/goose.tgz \
     && apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
-COPY --from=build /review-panel /usr/local/bin/review-panel
-ENTRYPOINT ["review-panel", "reviewbench"]
+COPY --from=build /review /usr/local/bin/review
+ENTRYPOINT ["review", "reviewbench"]
