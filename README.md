@@ -61,11 +61,14 @@ A host that stages its own Goose config and reads usage from Goose's session sto
 
 ## ReviewBench
 
-The image implements the [ReviewBench agent contract](https://github.com/review-bench/ReviewBench/blob/main/AGENT_CONTRACT.md):
+The image implements the [ReviewBench agent contract](https://github.com/review-bench/ReviewBench/blob/main/AGENT_CONTRACT.md). Each `v*` tag publishes `ghcr.io/block/review:<tag>`, and the release workflow's summary lists the `ghcr.io/block/review@sha256:…` digest to register. From a ReviewBench checkout:
 
 ```sh
+scripts/try-agent.sh ghcr.io/block/review@sha256:<digest> --pr 0 -e OPENAI_API_KEY
+
+# Or a local build:
 docker build --platform linux/amd64 -t review .
-scripts/try-agent.sh review --pr 0 -e OPENAI_API_KEY   # from a ReviewBench checkout
+scripts/try-agent.sh review --pr 0 -e OPENAI_API_KEY
 ```
 
 | Setting | Values | Default |
