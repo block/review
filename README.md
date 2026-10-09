@@ -57,6 +57,8 @@ res, err := review.Run(ctx, review.Config{
 
 `review.Options.Runner` replaces how each pass executes, and `OnPass` reports every pass, so a host can add its own accounting, routing, or telemetry.
 
+A host that stages its own Goose config and reads usage from Goose's session store can set `GooseConfig.SharedHome`, so every pass runs in the caller's Goose home and records its session there.
+
 ## ReviewBench
 
 The image implements the [ReviewBench agent contract](https://github.com/review-bench/ReviewBench/blob/main/AGENT_CONTRACT.md):

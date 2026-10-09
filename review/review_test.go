@@ -275,6 +275,20 @@ func TestGooseRunIsIsolated(t *testing.T) {
 	}
 }
 
+func TestGooseSharedHomeKeepsCallerHomeAndSessions(t *testing.T) {
+	r := GooseRunner{Config: GooseConfig{SharedHome: true, Env: []string{"GOOSE_PATH_ROOT=/caller", "XDG_DATA_HOME=/data"}}}
+	if args := strings.Join(r.args(""), " "); strings.Contains(args, "--no-session") {
+		t.Errorf("shared home must record sessions: %s", args)
+	}
+	env := strings.Join(r.env("", ""), "\n")
+	if !strings.Contains(env, "GOOSE_PATH_ROOT=/caller") || !strings.Contains(env, "XDG_DATA_HOME=/data") {
+		t.Errorf("shared home must keep the caller's Goose paths:\n%s", env)
+	}
+	if args := strings.Join(GooseRunner{}.args(""), " "); !strings.Contains(args, "--no-session") {
+		t.Errorf("default runner must not record sessions: %s", args)
+	}
+}
+
 func panelistName(id string) string {
 	for _, r := range panelistRoles {
 		if r.ID == id {

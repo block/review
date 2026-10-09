@@ -34,12 +34,17 @@ type GooseConfig struct {
 	// StateDir, when set, keeps each pass's Goose config, logs, and requests
 	// under StateDir/<role>. Otherwise they go to a temporary directory.
 	StateDir string
+	// SharedHome runs every pass in the caller's Goose home instead of a fresh
+	// one, and records sessions there, for hosts that stage their own Goose
+	// config and read usage from Goose's session store. StateDir is ignored.
+	SharedHome bool
 	// Env is the process environment. Nil inherits the caller's environment.
 	Env []string
 }
 
-// GooseRunner runs each pass as a `goose run` process with a fresh Goose home,
-// so no user config, extensions, hints, or sessions leak into the review.
+// GooseRunner runs each pass as a `goose run` process. By default each pass
+// gets a fresh Goose home, so no user config, extensions, hints, or sessions
+// leak into the review.
 type GooseRunner struct {
 	Config GooseConfig
 }
@@ -53,8 +58,12 @@ func (r GooseRunner) args(model string) []string {
 	if maxTurns == 0 {
 		maxTurns = 300
 	}
-	args := []string{"run", "--no-session", "--no-profile", "--with-builtin", "developer",
-		"--output-format", "json", "--max-turns", fmt.Sprint(maxTurns), "--instructions", "-"}
+	args := []string{"run"}
+	if !c.SharedHome {
+		args = append(args, "--no-session")
+	}
+	args = append(args, "--no-profile", "--with-builtin", "developer",
+		"--output-format", "json", "--max-turns", fmt.Sprint(maxTurns), "--instructions", "-")
 	if c.Provider != "" {
 		args = append(args, "--provider", c.Provider)
 	}
@@ -70,9 +79,11 @@ func (r GooseRunner) env(root, effort string) []string {
 		env = os.Environ()
 	}
 	overrides := map[string]string{
-		"GOOSE_PATH_ROOT":    root,
 		"GOOSE_MODE":         "auto",
 		"CONTEXT_FILE_NAMES": "[]",
+	}
+	if root != "" {
+		overrides["GOOSE_PATH_ROOT"] = root
 	}
 	if effort == "" {
 		effort = r.Config.Effort
@@ -99,7 +110,9 @@ func (r GooseRunner) env(root, effort string) []string {
 
 func (r GooseRunner) Run(ctx context.Context, pass Pass) (string, error) {
 	root := ""
-	if r.Config.StateDir != "" {
+	if r.Config.SharedHome {
+		// Keep the caller's Goose home.
+	} else if r.Config.StateDir != "" {
 		root = filepath.Join(r.Config.StateDir, pass.Role)
 		if err := os.MkdirAll(root, 0o755); err != nil {
 			return "", err
