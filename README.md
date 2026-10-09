@@ -25,7 +25,7 @@ If a panelist fails, the coordinator covers its lens and the review is marked de
 ## Usage
 
 ```sh
-go install github.com/block/review-panel/cmd/review-panel@latest
+go install github.com/block/review/cmd/review-panel@latest
 
 # Review the current branch against main with Goose's configured provider and model.
 review-panel review --base main
