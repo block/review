@@ -343,12 +343,16 @@ func TestGooseWrapsUpSlowAndJSONlessPasses(t *testing.T) {
 	if err := os.WriteFile(bin, []byte(fakeGoose), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, tc := range []struct{ mode, nudge string }{{"slow", wrapUpTimeUp}, {"prose", wrapUpNoJSON}} {
-		t.Run(tc.mode, func(t *testing.T) {
+	for _, tc := range []struct{ mode, role, nudge string }{
+		{"slow", "p", wrapUpTimeUp},
+		{"prose", "p", wrapUpNoJSON},
+		{"slow", RoleCoordinator, wrapUpTimeUp + " Return an empty dropped_candidates array to keep the reply short, and say so in review_process."},
+	} {
+		t.Run(tc.mode+"/"+tc.role, func(t *testing.T) {
 			dir := t.TempDir()
 			r := GooseRunner{Config: GooseConfig{Bin: bin, WrapUp: time.Second, Env: []string{"PATH=" + os.Getenv("PATH"), "FAKE_DIR=" + dir, "FAKE_MODE=" + tc.mode}}}
 			started := time.Now()
-			out, err := r.Run(context.Background(), Pass{Role: "p", Prompt: "review", RepoDir: dir, Timeout: 4 * time.Second})
+			out, err := r.Run(context.Background(), Pass{Role: tc.role, Prompt: "review", RepoDir: dir, Timeout: 4 * time.Second})
 			if err != nil || out != `{"findings":["wrapped"]}` {
 				t.Fatalf("got %q, %v", out, err)
 			}
