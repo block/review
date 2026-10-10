@@ -35,9 +35,13 @@ type GooseConfig struct {
 	// under StateDir/<role>. Otherwise they go to a temporary directory.
 	StateDir string
 	// SharedHome runs every pass in the caller's Goose home instead of a fresh
-	// one, and records sessions there, for hosts that stage their own Goose
-	// config and read usage from Goose's session store. StateDir is ignored.
+	// one, for hosts that stage their own Goose config and read usage from
+	// Goose's session store. StateDir is ignored.
 	SharedHome bool
+	// WrapUp is how much of a pass's timeout is held back for one more turn
+	// when the pass runs out of time or ends without a JSON answer. Zero uses
+	// 90 seconds. Passes with a timeout under twice WrapUp get no wrap-up.
+	WrapUp time.Duration
 	// Env is the process environment. Nil inherits the caller's environment.
 	Env []string
 }
@@ -49,7 +53,7 @@ type GooseRunner struct {
 	Config GooseConfig
 }
 
-func (r GooseRunner) args(model string) []string {
+func (r GooseRunner) args(model, session string, resume bool) []string {
 	c := r.Config
 	if model != "" {
 		c.Model = model
@@ -58,9 +62,11 @@ func (r GooseRunner) args(model string) []string {
 	if maxTurns == 0 {
 		maxTurns = 300
 	}
-	args := []string{"run"}
-	if !c.SharedHome {
-		args = append(args, "--no-session")
+	// Every pass records a named session so it can be resumed for a wrap-up
+	// turn; without SharedHome the session lives in the pass's private home.
+	args := []string{"run", "--name", session}
+	if resume {
+		args = append(args, "--resume")
 	}
 	args = append(args, "--no-profile", "--with-builtin", "developer",
 		"--output-format", "json", "--max-turns", fmt.Sprint(maxTurns), "--instructions", "-")
@@ -108,6 +114,18 @@ func (r GooseRunner) env(root, effort string) []string {
 	return out
 }
 
+const (
+	wrapUpTimeUp  = "Time is up. Do not call any more tools. Reply now with only the final JSON object your instructions describe, covering what you have verified so far."
+	wrapUpNoJSON  = "Your last reply did not contain the required JSON object. Do not call any more tools. Reply now with only that JSON object."
+	defaultWrapUp = 90 * time.Second
+)
+
+var errPassDeadline = errors.New("pass deadline")
+
+// Run runs the pass until its timeout less WrapUp. If the pass is still
+// working then, or finishes without a JSON object, Run resumes its session
+// for one more turn that asks for the answer, so a slow pass reports what it
+// has instead of nothing.
 func (r GooseRunner) Run(ctx context.Context, pass Pass) (string, error) {
 	root := ""
 	if r.Config.SharedHome {
@@ -130,14 +148,58 @@ func (r GooseRunner) Run(ctx context.Context, pass Pass) (string, error) {
 		ctx, cancel = context.WithTimeout(ctx, pass.Timeout)
 		defer cancel()
 	}
+	wrapUp := r.Config.WrapUp
+	if wrapUp == 0 {
+		wrapUp = defaultWrapUp
+	}
+	work := ctx
+	if pass.Timeout > 2*wrapUp {
+		var cancel context.CancelFunc
+		work, cancel = context.WithTimeout(ctx, pass.Timeout-wrapUp)
+		defer cancel()
+	}
+	session := fmt.Sprintf("review-%s-%d", pass.Role, time.Now().UnixNano())
+
+	out, err := r.exec(work, root, session, false, pass.Prompt, pass)
+	var nudge string
+	switch {
+	case errors.Is(err, errPassDeadline) && work != ctx && ctx.Err() == nil:
+		nudge = wrapUpTimeUp
+	case errors.Is(err, errPassDeadline):
+		return "", fmt.Errorf("%s pass exceeded %s", pass.Role, pass.Timeout)
+	case err != nil:
+		return "", err
+	default:
+		if _, jsonErr := extractJSONObject(out); jsonErr == nil {
+			return out, nil
+		}
+		nudge = wrapUpNoJSON
+	}
+
+	wrapCtx, cancel := context.WithTimeout(ctx, wrapUp)
+	defer cancel()
+	wrapped, wrapErr := r.exec(wrapCtx, root, session, true, nudge, pass)
+	if nudge == wrapUpNoJSON {
+		if wrapErr != nil {
+			return out, nil
+		}
+		return wrapped, nil
+	}
+	if wrapErr != nil {
+		return "", fmt.Errorf("%s pass exceeded %s and its wrap-up failed: %w", pass.Role, pass.Timeout-wrapUp, wrapErr)
+	}
+	return wrapped, nil
+}
+
+func (r GooseRunner) exec(ctx context.Context, root, session string, resume bool, input string, pass Pass) (string, error) {
 	bin := r.Config.Bin
 	if bin == "" {
 		bin = "goose"
 	}
-	cmd := exec.CommandContext(ctx, bin, r.args(pass.Model)...)
+	cmd := exec.CommandContext(ctx, bin, r.args(pass.Model, session, resume)...)
 	cmd.Dir = pass.RepoDir
 	cmd.Env = r.env(root, pass.Effort)
-	cmd.Stdin = strings.NewReader(pass.Prompt)
+	cmd.Stdin = strings.NewReader(input)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -147,7 +209,7 @@ func (r GooseRunner) Run(ctx context.Context, pass Pass) (string, error) {
 
 	runErr := cmd.Run()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return "", fmt.Errorf("%s pass exceeded %s", pass.Role, pass.Timeout)
+		return "", errPassDeadline
 	}
 	if runErr != nil {
 		return "", fmt.Errorf("%s pass: goose: %w: %s", pass.Role, runErr, tail(stderr.String()+stdout.String(), 4000))

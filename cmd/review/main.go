@@ -102,7 +102,8 @@ func firstLine(s string) string {
 // reviewBenchCmd implements https://github.com/review-bench/ReviewBench/blob/main/AGENT_CONTRACT.md.
 // The container is the sandbox, and the whole review must fit the 15-minute
 // limit per pull request: 7 minutes for the panel, then the coordinator and
-// judge share the rest of a 14-minute budget.
+// judge share the rest of a 14-minute budget. Each pass holds back its last
+// 90 seconds to report what it has if it runs long.
 func reviewBenchCmd(ctx context.Context) error {
 	env := func(k string) string { return strings.TrimSpace(os.Getenv(k)) }
 	for _, k := range []string{"RB_NWO", "RB_PR_NUMBER", "RB_BASE", "RB_HEAD", "RB_OUT"} {
@@ -140,7 +141,7 @@ func reviewBenchCmd(ctx context.Context) error {
 		CoordinatorTimeout: 6 * time.Minute,
 		JudgeTimeout:       4 * time.Minute,
 		Budget:             14 * time.Minute,
-		JudgeReserve:       2*time.Minute + 30*time.Second,
+		JudgeReserve:       90 * time.Second,
 	}
 	for name, d := range map[string]*time.Duration{
 		"REVIEW_PANELIST_TIMEOUT": &cfg.PanelistTimeout, "REVIEW_COORDINATOR_TIMEOUT": &cfg.CoordinatorTimeout,

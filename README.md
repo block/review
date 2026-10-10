@@ -20,7 +20,7 @@ An LLM code reviewer for git changes, built on [Goose](https://github.com/aaif-g
 - **The judge** re-examines only the dropped candidates and restores the ones that are real defects. Use a different model than the coordinator, so the two don't share blind spots.
 - **Delivery** merges the coordinator's and judge's findings and applies a gate: by default P0–P2 with confidence of at least 0.8. Calibrate the gate per model; models differ in how they rate confidence.
 
-If a panelist fails, the coordinator covers its lens and the review is marked degraded. If the judge fails, the coordinator's findings still stand.
+A pass that is still working 90 seconds before its timeout is stopped and asked, in the same session, for the findings it has so far; a pass that ends without a JSON answer gets one more turn to give it. If a panelist still fails, the coordinator covers its lens and the review is marked degraded. If the judge fails, the coordinator's findings still stand.
 
 ## Usage
 
