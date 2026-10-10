@@ -54,8 +54,11 @@ type GooseRunner struct {
 	Config GooseConfig
 }
 
-func (r GooseRunner) args(model, session string, resume bool) []string {
+func (r GooseRunner) args(provider, model, session string, resume bool) []string {
 	c := r.Config
+	if provider != "" {
+		c.Provider = provider
+	}
 	if model != "" {
 		c.Model = model
 	}
@@ -197,7 +200,7 @@ func (r GooseRunner) exec(ctx context.Context, root, session string, resume bool
 	if bin == "" {
 		bin = "goose"
 	}
-	cmd := exec.CommandContext(ctx, bin, r.args(pass.Model, session, resume)...)
+	cmd := exec.CommandContext(ctx, bin, r.args(pass.Provider, pass.Model, session, resume)...)
 	cmd.Dir = pass.RepoDir
 	cmd.Env = r.env(root, pass.Effort)
 	cmd.Stdin = strings.NewReader(input)
