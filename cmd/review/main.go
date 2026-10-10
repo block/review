@@ -103,7 +103,7 @@ func firstLine(s string) string {
 // The container is the sandbox, and the whole review must fit the 15-minute
 // limit per pull request: 7 minutes for the panel, then the coordinator and
 // judge share the rest of a 14-minute budget. Each pass holds back its last
-// 90 seconds to report what it has if it runs long.
+// two minutes to report what it has if it runs long.
 func reviewBenchCmd(ctx context.Context) error {
 	env := func(k string) string { return strings.TrimSpace(os.Getenv(k)) }
 	for _, k := range []string{"RB_NWO", "RB_PR_NUMBER", "RB_BASE", "RB_HEAD", "RB_OUT"} {

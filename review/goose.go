@@ -40,7 +40,8 @@ type GooseConfig struct {
 	SharedHome bool
 	// WrapUp is how much of a pass's timeout is held back for one more turn
 	// when the pass runs out of time or ends without a JSON answer. Zero uses
-	// 90 seconds. Passes with a timeout under twice WrapUp get no wrap-up.
+	// two minutes, about what a long JSON answer takes to write. Passes with
+	// a timeout under twice WrapUp get no wrap-up.
 	WrapUp time.Duration
 	// Env is the process environment. Nil inherits the caller's environment.
 	Env []string
@@ -117,7 +118,7 @@ func (r GooseRunner) env(root, effort string) []string {
 const (
 	wrapUpTimeUp  = "Time is up. Do not call any more tools. Reply now with only the final JSON object your instructions describe, covering what you have verified so far."
 	wrapUpNoJSON  = "Your last reply did not contain the required JSON object. Do not call any more tools. Reply now with only that JSON object."
-	defaultWrapUp = 90 * time.Second
+	defaultWrapUp = 2 * time.Minute
 )
 
 var errPassDeadline = errors.New("pass deadline")
