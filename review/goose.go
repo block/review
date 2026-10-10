@@ -54,8 +54,11 @@ type GooseRunner struct {
 	Config GooseConfig
 }
 
-func (r GooseRunner) args(model, session string, resume bool) []string {
+func (r GooseRunner) args(provider, model, session string, resume bool) []string {
 	c := r.Config
+	if provider != "" {
+		c.Provider = provider
+	}
 	if model != "" {
 		c.Model = model
 	}
@@ -116,9 +119,12 @@ func (r GooseRunner) env(root, effort string) []string {
 }
 
 const (
-	wrapUpTimeUp  = "Time is up. Do not call any more tools. Reply now with only the final JSON object your instructions describe, covering what you have verified so far."
-	wrapUpNoJSON  = "Your last reply did not contain the required JSON object. Do not call any more tools. Reply now with only that JSON object."
-	defaultWrapUp = 2 * time.Minute
+	wrapUpTimeUp = "Time is up. Do not call any more tools. Reply now with only the final JSON object your instructions describe, covering what you have verified so far."
+	wrapUpNoJSON = "Your last reply did not contain the required JSON object. Do not call any more tools. Reply now with only that JSON object."
+	// A coordinator reconciling a large panel can run out of time again just
+	// writing its drop list, which is the longest part of its reply.
+	wrapUpCoordinator = " Return an empty dropped_candidates array to keep the reply short, and say so in review_process."
+	defaultWrapUp     = 2 * time.Minute
 )
 
 var errPassDeadline = errors.New("pass deadline")
@@ -166,6 +172,9 @@ func (r GooseRunner) Run(ctx context.Context, pass Pass) (string, error) {
 	switch {
 	case errors.Is(err, errPassDeadline) && work != ctx && ctx.Err() == nil:
 		nudge = wrapUpTimeUp
+		if pass.Role == RoleCoordinator {
+			nudge += wrapUpCoordinator
+		}
 	case errors.Is(err, errPassDeadline):
 		return "", fmt.Errorf("%s pass exceeded %s", pass.Role, pass.Timeout)
 	case err != nil:
@@ -197,7 +206,7 @@ func (r GooseRunner) exec(ctx context.Context, root, session string, resume bool
 	if bin == "" {
 		bin = "goose"
 	}
-	cmd := exec.CommandContext(ctx, bin, r.args(pass.Model, session, resume)...)
+	cmd := exec.CommandContext(ctx, bin, r.args(pass.Provider, pass.Model, session, resume)...)
 	cmd.Dir = pass.RepoDir
 	cmd.Env = r.env(root, pass.Effort)
 	cmd.Stdin = strings.NewReader(input)

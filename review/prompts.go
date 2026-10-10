@@ -40,7 +40,16 @@ func renderTarget(base, head string) string {
 // untrusted-data boundary.
 func coordinatorPrompt(cfg Config, base string, results []PanelistResult) (string, error) {
 	var b strings.Builder
-	if err := coordinatorTmpl.ExecuteTemplate(&b, "coordinator.md.tmpl", struct{ Discussion bool }{strings.TrimSpace(cfg.Discussion) != ""}); err != nil {
+	var names []string
+	for _, p := range panel(cfg) {
+		names = append(names, "**"+p.name()+"**")
+	}
+	roster := strings.Join(names[:len(names)-1], ", ") + ", and " + names[len(names)-1]
+	data := struct {
+		Discussion, Variants bool
+		Panelists            string
+	}{strings.TrimSpace(cfg.Discussion) != "", len(cfg.PanelVariants) > 0, roster}
+	if err := coordinatorTmpl.ExecuteTemplate(&b, "coordinator.md.tmpl", data); err != nil {
 		return "", err
 	}
 	b.WriteString("\n---\n\n")

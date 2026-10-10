@@ -27,7 +27,7 @@ type Result struct {
 	Degraded bool `json:"degraded"`
 }
 
-// Run reviews merge-base(BaseSHA, HeadSHA)..HeadSHA in cfg.RepoDir: three
+// Run reviews merge-base(BaseSHA, HeadSHA)..HeadSHA in cfg.RepoDir: the
 // panelists in parallel, then the coordinator, then the judge.
 func Run(ctx context.Context, cfg Config, opts Options) (*Result, error) {
 	cfg.applyDefaults()
@@ -53,11 +53,15 @@ func Run(ctx context.Context, cfg Config, opts Options) (*Result, error) {
 	}
 	res := &Result{Base: base, Head: head, Dropped: []DroppedCandidate{}}
 	var mu sync.Mutex
-	run := func(role, prompt string, timeout time.Duration) (string, error) {
+	// run executes one pass; keys after the role are less specific override
+	// keys, such as a panelist's variant and lens.
+	run := func(prompt string, timeout time.Duration, role string, keys ...string) (string, error) {
 		start := time.Now()
-		pass := Pass{Role: role, Model: cfg.RoleModels[role], Effort: cfg.RoleEfforts[role], Prompt: prompt, RepoDir: cfg.RepoDir, Timeout: timeout}
+		keys = append([]string{role}, keys...)
+		pass := Pass{Role: role, Provider: setting(cfg.RoleProviders, keys...), Model: setting(cfg.RoleModels, keys...),
+			Effort: setting(cfg.RoleEfforts, keys...), Prompt: prompt, RepoDir: cfg.RepoDir, Timeout: timeout}
 		out, err := runner.Run(ctx, pass)
-		report := PassReport{Role: role, Model: pass.Model, Effort: pass.Effort, Status: "ok", Duration: time.Since(start)}
+		report := PassReport{Role: role, Provider: pass.Provider, Model: pass.Model, Effort: pass.Effort, Status: "ok", Duration: time.Since(start)}
 		if err != nil {
 			report.Status, report.Error = "failed", err.Error()
 		}
@@ -95,7 +99,7 @@ func Run(ctx context.Context, cfg Config, opts Options) (*Result, error) {
 	if timeout < time.Minute {
 		return res, fmt.Errorf("review: only %s of the %s budget is left for the coordinator", timeout.Round(time.Second), cfg.Budget)
 	}
-	out, err := run(RoleCoordinator, prompt, timeout)
+	out, err := run(prompt, timeout, RoleCoordinator)
 	if err != nil {
 		return res, err
 	}
@@ -116,7 +120,7 @@ func Run(ctx context.Context, cfg Config, opts Options) (*Result, error) {
 			res.Degraded = true
 		} else if prompt, err := judgePrompt(cfg, base, kept, res.Dropped); err != nil {
 			return res, err
-		} else if out, err := run(RoleJudge, prompt, timeout); err != nil {
+		} else if out, err := run(prompt, timeout, RoleJudge); err != nil {
 			res.Degraded = true
 		} else if restored, err := parseJudge(out, cfg.RepoDir); err != nil {
 			res.Degraded = true
@@ -135,17 +139,18 @@ func Run(ctx context.Context, cfg Config, opts Options) (*Result, error) {
 	return res, nil
 }
 
-func runPanelists(cfg Config, base string, run func(role, prompt string, timeout time.Duration) (string, error)) []PanelistResult {
-	results := make([]PanelistResult, len(panelistRoles))
+func runPanelists(cfg Config, base string, run func(prompt string, timeout time.Duration, role string, keys ...string) (string, error)) []PanelistResult {
+	roster := panel(cfg)
+	results := make([]PanelistResult, len(roster))
 	var wg sync.WaitGroup
-	for i, role := range panelistRoles {
+	for i, p := range roster {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			result := PanelistResult{Panelist: role.Name, Status: "completed"}
-			out, err := run(role.ID, panelistPrompt(role, cfg, base), cfg.PanelistTimeout)
+			result := PanelistResult{Panelist: p.name(), Status: "completed"}
+			out, err := run(panelistPrompt(p, cfg, base), cfg.PanelistTimeout, p.id(), p.Variant, p.ID)
 			if err == nil {
-				result.Envelope, err = parsePanelistEnvelope(out, role)
+				result.Envelope, err = parsePanelistEnvelope(out, p)
 			}
 			if err != nil {
 				result.Status, result.Envelope, result.Error = "failed", nil, err.Error()

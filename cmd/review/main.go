@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"time"
 
@@ -52,6 +53,8 @@ func reviewCmd(ctx context.Context, args []string) error {
 	provider := fs.String("provider", "", "Goose model provider (default: Goose's configured provider)")
 	model := fs.String("model", "", "model for every pass (default: Goose's configured model)")
 	effort := fs.String("effort", "", "reasoning effort for every pass: low, medium, or high")
+	variants := fs.String("panel-variants", "", "run each lens once per variant, e.g. sol,opus")
+	roleProviders := fs.String("role-providers", "", "per-pass providers, e.g. sol=openai,opus=anthropic")
 	roleModels := fs.String("role-models", "", "per-pass models, e.g. behavior_state_data=a,coordinator=b,judge=c")
 	roleEfforts := fs.String("role-efforts", "", "per-pass efforts, e.g. coordinator=medium")
 	intent := fs.String("intent", "", "author's description of the change (untrusted evidence)")
@@ -63,9 +66,11 @@ func reviewCmd(ctx context.Context, args []string) error {
 	}
 	cfg := review.Config{
 		RepoDir: *repo, BaseSHA: *base, HeadSHA: *head, Intent: *intent,
-		Goose:       review.GooseConfig{Provider: *provider, Model: *model, Effort: *effort},
-		RoleModels:  parsePairs(*roleModels),
-		RoleEfforts: parsePairs(*roleEfforts),
+		Goose:         review.GooseConfig{Provider: *provider, Model: *model, Effort: *effort},
+		PanelVariants: parseList(*variants),
+		RoleProviders: parsePairs(*roleProviders),
+		RoleModels:    parsePairs(*roleModels),
+		RoleEfforts:   parsePairs(*roleEfforts),
 	}
 	if *noGate {
 		cfg.Gate = review.NoGate
@@ -100,10 +105,12 @@ func firstLine(s string) string {
 }
 
 // reviewBenchCmd implements https://github.com/review-bench/ReviewBench/blob/main/AGENT_CONTRACT.md.
-// The container is the sandbox, and the whole review must fit the 15-minute
-// limit per pull request: 7 minutes for the panel, then the coordinator and
-// judge share the rest of a 14-minute budget. Each pass holds back its last
-// two minutes to report what it has if it runs long.
+// The container is the sandbox, and the whole review must fit the per-PR
+// limit, 15 minutes unless RB_CONFIG_TIME_LIMIT names the limit granted in
+// the manifest. Of a 15-minute limit, the panel gets 7 minutes and the
+// coordinator and judge share the rest of a 14-minute budget; longer limits
+// scale every stage. Each pass holds back its last two minutes to report what
+// it has if it runs long.
 func reviewBenchCmd(ctx context.Context) error {
 	env := func(k string) string { return strings.TrimSpace(os.Getenv(k)) }
 	for _, k := range []string{"RB_NWO", "RB_PR_NUMBER", "RB_BASE", "RB_HEAD", "RB_OUT"} {
@@ -128,21 +135,42 @@ func reviewBenchCmd(ctx context.Context) error {
 		Effort:   orDefault(env("RB_CONFIG_EFFORT"), "high"),
 		StateDir: env("REVIEW_STATE_DIR"),
 	}
-	if provider == "openai" {
-		baseURL := orDefault(env("RB_MODEL_BASE_URL"), "https://api.openai.com/v1")
-		goose.Env = append(os.Environ(), "OPENAI_HOST="+strings.TrimSuffix(strings.TrimSuffix(baseURL, "/"), "/v1"))
+	roleProviders := parsePairs(env("RB_CONFIG_ROLE_PROVIDERS"))
+	usesOpenAI := provider == "openai"
+	for _, p := range roleProviders {
+		usesOpenAI = usesOpenAI || p == "openai"
+	}
+	if usesOpenAI {
+		goose.Env = os.Environ()
+		if provider == "openai" {
+			baseURL := orDefault(env("RB_MODEL_BASE_URL"), "https://api.openai.com/v1")
+			goose.Env = append(goose.Env, "OPENAI_HOST="+strings.TrimSuffix(strings.TrimSuffix(baseURL, "/"), "/v1"))
+		}
+		// Goose sends models it does not recognize, such as gpt-6.1-sol, to
+		// Chat Completions, where those models cannot call tools.
+		if env("OPENAI_BASE_PATH") == "" {
+			goose.Env = append(goose.Env, "OPENAI_BASE_PATH=v1/responses")
+		}
 	}
 	cfg := review.Config{
 		RepoDir: repo, BaseSHA: env("RB_BASE"), HeadSHA: env("RB_HEAD"), Intent: intent,
-		Goose:              goose,
-		RoleModels:         parsePairs(env("RB_CONFIG_ROLE_MODELS")),
-		RoleEfforts:        parsePairs(env("RB_CONFIG_ROLE_EFFORTS")),
-		PanelistTimeout:    7 * time.Minute,
-		CoordinatorTimeout: 6 * time.Minute,
-		JudgeTimeout:       4 * time.Minute,
-		Budget:             14 * time.Minute,
-		JudgeReserve:       90 * time.Second,
+		Goose:         goose,
+		PanelVariants: parseList(env("RB_CONFIG_PANEL_VARIANTS")),
+		RoleProviders: roleProviders,
+		RoleModels:    parsePairs(env("RB_CONFIG_ROLE_MODELS")),
+		RoleEfforts:   parsePairs(env("RB_CONFIG_ROLE_EFFORTS")),
+		JudgeReserve:  90 * time.Second,
 	}
+	limit := 15 * time.Minute
+	if v := env("RB_CONFIG_TIME_LIMIT"); v != "" {
+		seconds, err := strconv.Atoi(v)
+		if err != nil || seconds < 900 {
+			return fmt.Errorf("RB_CONFIG_TIME_LIMIT: want seconds, at least 900, got %q", v)
+		}
+		limit = time.Duration(seconds) * time.Second
+	}
+	cfg.PanelistTimeout, cfg.CoordinatorTimeout = limit*7/15, limit*6/15
+	cfg.JudgeTimeout, cfg.Budget = limit*4/15, limit-time.Minute
 	for name, d := range map[string]*time.Duration{
 		"REVIEW_PANELIST_TIMEOUT": &cfg.PanelistTimeout, "REVIEW_COORDINATOR_TIMEOUT": &cfg.CoordinatorTimeout,
 		"REVIEW_JUDGE_TIMEOUT": &cfg.JudgeTimeout, "REVIEW_BUDGET": &cfg.Budget, "REVIEW_JUDGE_RESERVE": &cfg.JudgeReserve,
@@ -158,8 +186,9 @@ func reviewBenchCmd(ctx context.Context) error {
 	if env("RB_CONFIG_GATE") == "off" {
 		cfg.Gate = review.NoGate
 	}
-	fmt.Fprintf(os.Stderr, "review: provider=%s model=%s effort=%s gate=%s role_models=%s role_efforts=%s\n",
-		provider, goose.Model, goose.Effort, orDefault(env("RB_CONFIG_GATE"), "on"), env("RB_CONFIG_ROLE_MODELS"), env("RB_CONFIG_ROLE_EFFORTS"))
+	fmt.Fprintf(os.Stderr, "review: time_limit=%s provider=%s model=%s effort=%s gate=%s panel_variants=%s role_providers=%s role_models=%s role_efforts=%s\n",
+		limit, provider, goose.Model, goose.Effort, orDefault(env("RB_CONFIG_GATE"), "on"), env("RB_CONFIG_PANEL_VARIANTS"),
+		env("RB_CONFIG_ROLE_PROVIDERS"), env("RB_CONFIG_ROLE_MODELS"), env("RB_CONFIG_ROLE_EFFORTS"))
 
 	res, err := review.Run(ctx, cfg, review.Options{OnPass: logPass})
 	if path := env("REVIEW_RESULT"); path != "" && res != nil {
@@ -211,6 +240,16 @@ func parsePairs(spec string) map[string]string {
 		}
 	}
 	return pairs
+}
+
+func parseList(spec string) []string {
+	var out []string
+	for _, v := range strings.Split(spec, ",") {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func orDefault(v, d string) string {

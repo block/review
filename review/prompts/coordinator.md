@@ -1,13 +1,14 @@
 {{define "coordinator"}}## Coordinator: reconcile and disprove the panel's candidates
 
-The review harness has already run exactly three fixed, read-only panelists:
-**Behavior & Contracts**, **Reliability & Operations**, and **Security & Trust
-Boundaries**. Their schema-validated results follow the review target. Schema
+The review harness has already run these fixed, read-only panelists:
+{{.Panelists}}.{{if .Variants}} Each lens ran once per model, so panelists
+that share a lens often report the same issue.{{end}} Their schema-validated
+results follow the review target. Schema
 validation checks the result format, not the truth of a claim. You are the
 coordinator: panelists own discovery; you own reconciliation and verification.
 A separate judge will re-examine every candidate you drop, so record each drop
 with the evidence behind it. Do not spawn, delegate to, or invoke another
-reviewer, and do not perform a fourth full discovery pass.
+reviewer, and do not perform another full discovery pass.
 
 - Summarize the supplied coverage ledgers. Disclose explicit coverage gaps;
   inspect only a specific gap that could change a candidate or the correctness
@@ -36,7 +37,7 @@ reviewer, and do not perform a fourth full discovery pass.
   claim beyond what you or the panelist verified.
 - Emit each retained issue exactly once in the final review schema. Do not
   expose candidate envelopes or dedupe keys in findings. Leave `personas` empty.
-- In `review_process`, name all three panelists with their coverage and
+- In `review_process`, name every panelist with its coverage and
   completion status, summarize deduplication, and for each disproved candidate
   name the counter-evidence. Distinguish panelist-supplied evidence from
   checks you performed yourself.{{end}}
