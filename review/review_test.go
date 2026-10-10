@@ -258,8 +258,8 @@ func TestGooseFinalMessage(t *testing.T) {
 
 func TestGooseRunIsIsolated(t *testing.T) {
 	r := GooseRunner{Config: GooseConfig{Provider: "openai", Model: "m", Effort: "high", Env: []string{"GOOSE_MODE=approve", "CONTEXT_FILE_NAMES=[\"AGENTS.md\"]", "KEEP=1"}}}
-	args := strings.Join(r.args("override"), " ")
-	for _, want := range []string{"--no-session --no-profile --with-builtin developer", "--output-format json", "--instructions -", "--provider openai --model override"} {
+	args := strings.Join(r.args("override", "s1", false), " ")
+	for _, want := range []string{"run --name s1 --no-profile --with-builtin developer", "--output-format json", "--instructions -", "--provider openai --model override"} {
 		if !strings.Contains(args, want) {
 			t.Errorf("args missing %q: %s", want, args)
 		}
@@ -277,15 +277,53 @@ func TestGooseRunIsIsolated(t *testing.T) {
 
 func TestGooseSharedHomeKeepsCallerHomeAndSessions(t *testing.T) {
 	r := GooseRunner{Config: GooseConfig{SharedHome: true, Env: []string{"GOOSE_PATH_ROOT=/caller", "XDG_DATA_HOME=/data"}}}
-	if args := strings.Join(r.args(""), " "); strings.Contains(args, "--no-session") {
-		t.Errorf("shared home must record sessions: %s", args)
-	}
 	env := strings.Join(r.env("", ""), "\n")
 	if !strings.Contains(env, "GOOSE_PATH_ROOT=/caller") || !strings.Contains(env, "XDG_DATA_HOME=/data") {
 		t.Errorf("shared home must keep the caller's Goose paths:\n%s", env)
 	}
-	if args := strings.Join(GooseRunner{}.args(""), " "); !strings.Contains(args, "--no-session") {
-		t.Errorf("default runner must not record sessions: %s", args)
+}
+
+// fakeGoose answers like `goose run --output-format json`. A first run in
+// mode "slow" outlives the soft deadline and one in mode "prose" ends without
+// JSON; a resumed run answers with JSON. It logs each call's args and input.
+const fakeGoose = `#!/bin/sh
+log="$FAKE_DIR/calls"
+input=$(cat)
+printf '%s\t%s\n' "$*" "$input" >> "$log"
+answer() { printf '  banner\n{\n"messages":[{"role":"assistant","content":[{"type":"text","text":"%s"}]}],"metadata":{"status":"completed"}}\n' "$1"; }
+case " $* " in
+*" --resume "*) answer '{\"findings\":[\"wrapped\"]}' ;;
+*) if [ "$FAKE_MODE" = slow ]; then sleep 30; fi; answer 'I reviewed it and it looks fine.' ;;
+esac
+`
+
+func TestGooseWrapsUpSlowAndJSONlessPasses(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "goose")
+	if err := os.WriteFile(bin, []byte(fakeGoose), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ mode, nudge string }{{"slow", wrapUpTimeUp}, {"prose", wrapUpNoJSON}} {
+		t.Run(tc.mode, func(t *testing.T) {
+			dir := t.TempDir()
+			r := GooseRunner{Config: GooseConfig{Bin: bin, WrapUp: time.Second, Env: []string{"PATH=" + os.Getenv("PATH"), "FAKE_DIR=" + dir, "FAKE_MODE=" + tc.mode}}}
+			started := time.Now()
+			out, err := r.Run(context.Background(), Pass{Role: "p", Prompt: "review", RepoDir: dir, Timeout: 4 * time.Second})
+			if err != nil || out != `{"findings":["wrapped"]}` {
+				t.Fatalf("got %q, %v", out, err)
+			}
+			if elapsed := time.Since(started); elapsed > 4*time.Second {
+				t.Errorf("took %s, past the 4s timeout", elapsed)
+			}
+			raw, _ := os.ReadFile(filepath.Join(dir, "calls"))
+			calls := strings.Split(strings.TrimSpace(string(raw)), "\n")
+			if len(calls) != 2 {
+				t.Fatalf("want a run and one wrap-up, got %q", calls)
+			}
+			first, second := strings.Fields(calls[0]), strings.Fields(calls[1])
+			if first[2] != second[2] || !strings.Contains(calls[1], "--resume") || !strings.HasSuffix(calls[1], "\t"+tc.nudge) {
+				t.Errorf("wrap-up must resume the same session with %q:\n%s\n%s", tc.nudge, calls[0], calls[1])
+			}
+		})
 	}
 }
 
