@@ -20,7 +20,7 @@ An LLM code reviewer for git changes, built on [Goose](https://github.com/aaif-g
 - **The judge** re-examines only the dropped candidates and restores the ones that are real defects. Use a different model than the coordinator, so the two don't share blind spots.
 - **Delivery** merges the coordinator's and judge's findings and applies a gate: by default P0–P2 with confidence of at least 0.8. Calibrate the gate per model; models differ in how they rate confidence.
 
-A pass that is still working two minutes before its timeout is stopped and asked, in the same session, for the findings it has so far; a pass that ends without a JSON answer gets one more turn to give it. If a panelist still fails, the coordinator covers its lens and the review is marked degraded. If the judge fails, the coordinator's findings still stand.
+A pass that is still working two minutes before its timeout is stopped and asked, in the same session, for the findings it has so far; a pass that ends without a JSON answer gets one more turn to give it. A coordinator that runs out of time skips its list of dropped candidates, so its reply fits the wrap-up. If a panelist still fails, the coordinator covers its lens and the review is marked degraded. If the judge fails, the coordinator's findings still stand.
 
 ## Usage
 
@@ -87,8 +87,9 @@ scripts/try-agent.sh review --pr 0 -e OPENAI_API_KEY
 | `RB_CONFIG_ROLE_MODELS` | `role=model,...` | none |
 | `RB_CONFIG_ROLE_EFFORTS` | `role=effort,...` | none |
 | `RB_CONFIG_GATE` | `on`, `off` | `on` |
+| `RB_CONFIG_TIME_LIMIT` | seconds, at least 900: the per-PR limit in the manifest | `900` |
 
-With the `openai` provider, the model endpoint comes from `RB_MODEL_BASE_URL` and the key from `OPENAI_API_KEY`; OpenAI passes use the Responses API, which models such as `gpt-6.1-sol` need for tool calls. A second provider, such as `anthropic` with `ANTHROPIC_API_KEY`, needs its host declared as egress. The whole review is budgeted to fit ReviewBench's 15-minute limit per pull request: up to 7 minutes for the panel, then the coordinator and judge share the rest of a 14-minute budget.
+With the `openai` provider, the model endpoint comes from `RB_MODEL_BASE_URL` and the key from `OPENAI_API_KEY`; OpenAI passes use the Responses API, which models such as `gpt-6.1-sol` need for tool calls. A second provider, such as `anthropic` with `ANTHROPIC_API_KEY`, needs its host declared as egress. The whole review is budgeted to fit the per-PR limit, 15 minutes by default: up to 7 minutes for the panel, then the coordinator and judge share the rest of a 14-minute budget. A longer `RB_CONFIG_TIME_LIMIT` scales every stage; set it only to a limit ReviewBench has granted, or the run is cut off first.
 
 ## License
 
