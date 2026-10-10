@@ -52,6 +52,8 @@ func reviewCmd(ctx context.Context, args []string) error {
 	provider := fs.String("provider", "", "Goose model provider (default: Goose's configured provider)")
 	model := fs.String("model", "", "model for every pass (default: Goose's configured model)")
 	effort := fs.String("effort", "", "reasoning effort for every pass: low, medium, or high")
+	variants := fs.String("panel-variants", "", "run each lens once per variant, e.g. sol,opus")
+	roleProviders := fs.String("role-providers", "", "per-pass providers, e.g. sol=openai,opus=anthropic")
 	roleModels := fs.String("role-models", "", "per-pass models, e.g. behavior_state_data=a,coordinator=b,judge=c")
 	roleEfforts := fs.String("role-efforts", "", "per-pass efforts, e.g. coordinator=medium")
 	intent := fs.String("intent", "", "author's description of the change (untrusted evidence)")
@@ -63,9 +65,11 @@ func reviewCmd(ctx context.Context, args []string) error {
 	}
 	cfg := review.Config{
 		RepoDir: *repo, BaseSHA: *base, HeadSHA: *head, Intent: *intent,
-		Goose:       review.GooseConfig{Provider: *provider, Model: *model, Effort: *effort},
-		RoleModels:  parsePairs(*roleModels),
-		RoleEfforts: parsePairs(*roleEfforts),
+		Goose:         review.GooseConfig{Provider: *provider, Model: *model, Effort: *effort},
+		PanelVariants: parseList(*variants),
+		RoleProviders: parsePairs(*roleProviders),
+		RoleModels:    parsePairs(*roleModels),
+		RoleEfforts:   parsePairs(*roleEfforts),
 	}
 	if *noGate {
 		cfg.Gate = review.NoGate
@@ -128,13 +132,28 @@ func reviewBenchCmd(ctx context.Context) error {
 		Effort:   orDefault(env("RB_CONFIG_EFFORT"), "high"),
 		StateDir: env("REVIEW_STATE_DIR"),
 	}
-	if provider == "openai" {
-		baseURL := orDefault(env("RB_MODEL_BASE_URL"), "https://api.openai.com/v1")
-		goose.Env = append(os.Environ(), "OPENAI_HOST="+strings.TrimSuffix(strings.TrimSuffix(baseURL, "/"), "/v1"))
+	roleProviders := parsePairs(env("RB_CONFIG_ROLE_PROVIDERS"))
+	usesOpenAI := provider == "openai"
+	for _, p := range roleProviders {
+		usesOpenAI = usesOpenAI || p == "openai"
+	}
+	if usesOpenAI {
+		goose.Env = os.Environ()
+		if provider == "openai" {
+			baseURL := orDefault(env("RB_MODEL_BASE_URL"), "https://api.openai.com/v1")
+			goose.Env = append(goose.Env, "OPENAI_HOST="+strings.TrimSuffix(strings.TrimSuffix(baseURL, "/"), "/v1"))
+		}
+		// Goose sends models it does not recognize, such as gpt-6.1-sol, to
+		// Chat Completions, where those models cannot call tools.
+		if env("OPENAI_BASE_PATH") == "" {
+			goose.Env = append(goose.Env, "OPENAI_BASE_PATH=v1/responses")
+		}
 	}
 	cfg := review.Config{
 		RepoDir: repo, BaseSHA: env("RB_BASE"), HeadSHA: env("RB_HEAD"), Intent: intent,
 		Goose:              goose,
+		PanelVariants:      parseList(env("RB_CONFIG_PANEL_VARIANTS")),
+		RoleProviders:      roleProviders,
 		RoleModels:         parsePairs(env("RB_CONFIG_ROLE_MODELS")),
 		RoleEfforts:        parsePairs(env("RB_CONFIG_ROLE_EFFORTS")),
 		PanelistTimeout:    7 * time.Minute,
@@ -158,8 +177,9 @@ func reviewBenchCmd(ctx context.Context) error {
 	if env("RB_CONFIG_GATE") == "off" {
 		cfg.Gate = review.NoGate
 	}
-	fmt.Fprintf(os.Stderr, "review: provider=%s model=%s effort=%s gate=%s role_models=%s role_efforts=%s\n",
-		provider, goose.Model, goose.Effort, orDefault(env("RB_CONFIG_GATE"), "on"), env("RB_CONFIG_ROLE_MODELS"), env("RB_CONFIG_ROLE_EFFORTS"))
+	fmt.Fprintf(os.Stderr, "review: provider=%s model=%s effort=%s gate=%s panel_variants=%s role_providers=%s role_models=%s role_efforts=%s\n",
+		provider, goose.Model, goose.Effort, orDefault(env("RB_CONFIG_GATE"), "on"), env("RB_CONFIG_PANEL_VARIANTS"),
+		env("RB_CONFIG_ROLE_PROVIDERS"), env("RB_CONFIG_ROLE_MODELS"), env("RB_CONFIG_ROLE_EFFORTS"))
 
 	res, err := review.Run(ctx, cfg, review.Options{OnPass: logPass})
 	if path := env("REVIEW_RESULT"); path != "" && res != nil {
@@ -211,6 +231,16 @@ func parsePairs(spec string) map[string]string {
 		}
 	}
 	return pairs
+}
+
+func parseList(spec string) []string {
+	var out []string
+	for _, v := range strings.Split(spec, ",") {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 func orDefault(v, d string) string {

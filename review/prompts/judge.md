@@ -1,4 +1,4 @@
-You are the judge for a code review. A panel of three reviewers raised candidate findings, and a coordinator reconciled them and tried to disprove each one. Re-examine the candidates the coordinator dropped, against the actual change, and decide which should have been kept.
+You are the judge for a code review. A panel of reviewers raised candidate findings, and a coordinator reconciled them and tried to disprove each one. Re-examine the candidates the coordinator dropped, against the actual change, and decide which should have been kept.
 
 Use git to inspect the same review target:
 

@@ -140,6 +140,47 @@ func TestPanelThenCoordinatorThenJudge(t *testing.T) {
 	}
 }
 
+func TestPanelVariantsRunEachLensPerModel(t *testing.T) {
+	dir, base, _ := testRepo(t)
+	outputs := map[string]string{RoleCoordinator: coordinatorOutput(dir, "")}
+	for _, role := range panelistRoles {
+		for _, v := range []string{"sol", "opus"} {
+			outputs[role.ID+"."+v] = envelope(role.Name+" ("+v+")", "")
+		}
+	}
+	runner := &fakeRunner{outputs: outputs}
+	cfg := Config{RepoDir: dir, BaseSHA: base, PanelVariants: []string{"sol", "opus"},
+		RoleProviders: map[string]string{"sol": "openai", "opus": "anthropic", RoleCoordinator: "openai"},
+		RoleModels:    map[string]string{"sol": "gpt", "opus": "claude", "security_contracts": "lens-model", "security_contracts.opus": "pinned"},
+		RoleEfforts:   map[string]string{"behavior_state_data": "medium"}}
+	res, err := Run(context.Background(), cfg, Options{Runner: runner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Degraded || len(res.Passes) != 7 {
+		t.Fatalf("degraded=%v passes=%d, want six panelists and a coordinator", res.Degraded, len(res.Passes))
+	}
+	p := runner.passes
+	for role, want := range map[string]Pass{
+		"behavior_state_data.sol":  {Provider: "openai", Model: "gpt", Effort: "medium"},
+		"behavior_state_data.opus": {Provider: "anthropic", Model: "claude", Effort: "medium"},
+		"security_contracts.sol":   {Provider: "openai", Model: "gpt"},
+		"security_contracts.opus":  {Provider: "anthropic", Model: "pinned"},
+		RoleCoordinator:            {Provider: "openai"},
+	} {
+		got := p[role]
+		if got.Provider != want.Provider || got.Model != want.Model || got.Effort != want.Effort {
+			t.Errorf("%s: provider=%q model=%q effort=%q, want %+v", role, got.Provider, got.Model, got.Effort, want)
+		}
+	}
+	coord := p[RoleCoordinator].Prompt
+	for _, want := range []string{"**Behavior & Contracts (sol)**", "**Security & Trust Boundaries (opus)**", "Each lens ran once per model"} {
+		if !strings.Contains(coord, want) {
+			t.Errorf("coordinator prompt missing %q", want)
+		}
+	}
+}
+
 func TestJudgeIsSkippedWhenNothingDropped(t *testing.T) {
 	dir, base, _ := testRepo(t)
 	runner := &fakeRunner{outputs: map[string]string{RoleCoordinator: coordinatorOutput(dir, "")}}
@@ -206,7 +247,7 @@ func TestPromptsHaveNoUnresolvedPlaceholders(t *testing.T) {
 	if !strings.Contains(p, "## Do not repeat existing discussion") {
 		t.Error("discussion guidance missing when discussion is supplied")
 	}
-	for _, role := range panelistRoles {
+	for _, role := range panel(cfg) {
 		if p := panelistPrompt(role, cfg, "base"); !strings.Contains(p, role.Procedure) || !strings.Contains(p, `"candidates"`) || strings.Contains(p, "P0-P2 issue") {
 			t.Errorf("%s prompt incomplete or still limited to P0-P2", role.ID)
 		}
@@ -214,7 +255,7 @@ func TestPromptsHaveNoUnresolvedPlaceholders(t *testing.T) {
 }
 
 func TestPanelistEnvelopeValidation(t *testing.T) {
-	role := panelistRoles[0]
+	role := panelist{panelistRoles[0], ""}
 	ok := strings.Replace(candidate, `"confidence_score":0.6`, `"confidence_score":0.5`, 1)
 	if _, err := parsePanelistEnvelope(envelope(role.Name, ok), role); err != nil {
 		t.Fatalf("valid envelope rejected: %v", err)
@@ -258,7 +299,7 @@ func TestGooseFinalMessage(t *testing.T) {
 
 func TestGooseRunIsIsolated(t *testing.T) {
 	r := GooseRunner{Config: GooseConfig{Provider: "openai", Model: "m", Effort: "high", Env: []string{"GOOSE_MODE=approve", "CONTEXT_FILE_NAMES=[\"AGENTS.md\"]", "KEEP=1"}}}
-	args := strings.Join(r.args("override", "s1", false), " ")
+	args := strings.Join(r.args("", "override", "s1", false), " ")
 	for _, want := range []string{"run --name s1 --no-profile --with-builtin developer", "--output-format json", "--instructions -", "--provider openai --model override"} {
 		if !strings.Contains(args, want) {
 			t.Errorf("args missing %q: %s", want, args)

@@ -1,9 +1,10 @@
 // Package review runs a panel code review of a git revision range with Goose.
 //
-// Three read-only panelists review the change in parallel, each through a
-// fixed lens. A coordinator deduplicates their candidates and tries to
-// disprove each one; a judge then re-examines what the coordinator dropped
-// and restores the findings that should have been kept.
+// Read-only panelists review the change in parallel, each through one of
+// three fixed lenses, optionally once per model variant. A coordinator
+// deduplicates their candidates and tries to disprove each one; a judge then
+// re-examines what the coordinator dropped and restores the findings that
+// should have been kept.
 //
 // Goose has no read-only sandbox: run reviews in a disposable container or
 // another sandbox that confines the checkout and the network.
@@ -38,10 +39,17 @@ type Config struct {
 	Context string
 
 	Goose GooseConfig
-	// RoleModels and RoleEfforts override the model and reasoning effort per
-	// pass role: a panelist id, "coordinator", or "judge".
-	RoleModels  map[string]string
-	RoleEfforts map[string]string
+	// PanelVariants runs every panelist lens once per variant, for example
+	// ["sol", "opus"] for six panelists. Empty runs each lens once.
+	PanelVariants []string
+	// RoleProviders, RoleModels, and RoleEfforts override the Goose provider,
+	// model, and reasoning effort per pass. Keys are a pass role ("coordinator",
+	// "judge", or a panelist id such as "security_contracts" or, with
+	// variants, "security_contracts.opus"), a panel variant ("opus"), or a
+	// lens ("security_contracts"); the most specific key wins in that order.
+	RoleProviders map[string]string
+	RoleModels    map[string]string
+	RoleEfforts   map[string]string
 
 	PanelistTimeout    time.Duration
 	CoordinatorTimeout time.Duration
@@ -80,17 +88,19 @@ type Runner interface {
 // Pass is one reviewer process: a panelist, the coordinator, or the judge.
 type Pass struct {
 	Role string
-	// Model and Effort override the runner's defaults for this pass.
-	Model   string
-	Effort  string
-	Prompt  string
-	RepoDir string
-	Timeout time.Duration
+	// Provider, Model, and Effort override the runner's defaults for this pass.
+	Provider string
+	Model    string
+	Effort   string
+	Prompt   string
+	RepoDir  string
+	Timeout  time.Duration
 }
 
 // PassReport describes how a pass ended.
 type PassReport struct {
 	Role     string        `json:"role"`
+	Provider string        `json:"provider,omitempty"`
 	Model    string        `json:"model,omitempty"`
 	Effort   string        `json:"effort,omitempty"`
 	Status   string        `json:"status"`
@@ -103,6 +113,17 @@ type Options struct {
 	Runner Runner
 	// OnPass is called after every pass finishes.
 	OnPass func(PassReport)
+}
+
+// setting returns the first non-empty override among keys, most specific
+// first.
+func setting(overrides map[string]string, keys ...string) string {
+	for _, k := range keys {
+		if v := overrides[k]; k != "" && v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func (c *Config) applyDefaults() {
