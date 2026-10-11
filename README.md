@@ -82,6 +82,7 @@ scripts/try-agent.sh review --pr 0 -e OPENAI_API_KEY
 | `RB_CONFIG_PROVIDER` | Goose provider | `openai` |
 | `RB_CONFIG_MODEL` | model id | `gpt-5.6-sol` |
 | `RB_CONFIG_EFFORT` | `low`, `medium`, `high` | `high` |
+| `RB_CONFIG_PANEL` | preset name; `sol-opus` runs every lens with `gpt-6.1-sol` and `claude-opus-5-5`, Opus coordinating and Sol judging. Other settings override the preset. | none |
 | `RB_CONFIG_PANEL_VARIANTS` | `variant,...` (each lens runs once per variant) | none |
 | `RB_CONFIG_ROLE_PROVIDERS` | `role=provider,...` | none |
 | `RB_CONFIG_ROLE_MODELS` | `role=model,...` | none |

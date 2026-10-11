@@ -118,6 +118,20 @@ func reviewBenchCmd(ctx context.Context) error {
 			return fmt.Errorf("missing %s", k)
 		}
 	}
+	// A preset fills in RB_CONFIG_* settings the manifest leaves unset, so a
+	// whole panel fits in one short label: the portal caps a reviewer's name
+	// plus all label values at 64 characters.
+	if name := env("RB_CONFIG_PANEL"); name != "" {
+		preset, ok := panelPresets[name]
+		if !ok {
+			return fmt.Errorf("RB_CONFIG_PANEL: unknown preset %q", name)
+		}
+		for k, v := range preset {
+			if env("RB_CONFIG_"+k) == "" {
+				os.Setenv("RB_CONFIG_"+k, v)
+			}
+		}
+	}
 	agent := orDefault(env("RB_AGENT"), "review")
 	repo := orDefault(env("RB_REPO"), "/work/repo")
 	intent := ""
@@ -186,8 +200,8 @@ func reviewBenchCmd(ctx context.Context) error {
 	if env("RB_CONFIG_GATE") == "off" {
 		cfg.Gate = review.NoGate
 	}
-	fmt.Fprintf(os.Stderr, "review: time_limit=%s provider=%s model=%s effort=%s gate=%s panel_variants=%s role_providers=%s role_models=%s role_efforts=%s\n",
-		limit, provider, goose.Model, goose.Effort, orDefault(env("RB_CONFIG_GATE"), "on"), env("RB_CONFIG_PANEL_VARIANTS"),
+	fmt.Fprintf(os.Stderr, "review: panel=%s time_limit=%s provider=%s model=%s effort=%s gate=%s panel_variants=%s role_providers=%s role_models=%s role_efforts=%s\n",
+		orDefault(env("RB_CONFIG_PANEL"), "default"), limit, provider, goose.Model, goose.Effort, orDefault(env("RB_CONFIG_GATE"), "on"), env("RB_CONFIG_PANEL_VARIANTS"),
 		env("RB_CONFIG_ROLE_PROVIDERS"), env("RB_CONFIG_ROLE_MODELS"), env("RB_CONFIG_ROLE_EFFORTS"))
 
 	res, err := review.Run(ctx, cfg, review.Options{OnPass: logPass})
@@ -230,6 +244,21 @@ func reviewBenchCmd(ctx context.Context) error {
 	fmt.Fprintf(os.Stderr, "review: %d finding(s) reported, %d returned (%d restored by the judge), %d dropped by the coordinator\n",
 		len(res.Findings), len(res.Ungated), restored, len(res.Dropped))
 	return os.WriteFile(env("RB_OUT"), payload, 0o644)
+}
+
+// panelPresets are named RB_CONFIG_* settings for RB_CONFIG_PANEL.
+var panelPresets = map[string]map[string]string{
+	// Every lens once with GPT-6.1 Sol and once with Claude Opus 5.5; Opus
+	// coordinates and Sol judges.
+	"sol-opus": {
+		"PROVIDER":       "openai",
+		"MODEL":          "gpt-6.1-sol",
+		"EFFORT":         "high",
+		"PANEL_VARIANTS": "sol,opus",
+		"ROLE_PROVIDERS": "opus=anthropic,coordinator=anthropic",
+		"ROLE_MODELS":    "opus=claude-opus-5-5,coordinator=claude-opus-5-5",
+		"ROLE_EFFORTS":   "sol=medium",
+	},
 }
 
 func parsePairs(spec string) map[string]string {
