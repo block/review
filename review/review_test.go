@@ -196,6 +196,22 @@ func TestJudgeIsSkippedWhenNothingDropped(t *testing.T) {
 	}
 }
 
+func TestRelativeRepoDirKeepsAbsolutePathFindings(t *testing.T) {
+	dir, base, _ := testRepo(t)
+	t.Chdir(dir)
+	runner := &fakeRunner{outputs: map[string]string{RoleCoordinator: coordinatorOutput(dir, "")}}
+	for _, id := range Panelists() {
+		runner.outputs[id] = envelope(panelistName(id), "")
+	}
+	res, err := Run(context.Background(), Config{RepoDir: ".", BaseSHA: base, Gate: NoGate}, Options{Runner: runner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 2 || res.Findings[0].File != "a.go" {
+		t.Fatalf("findings with RepoDir \".\": %+v", res.Findings)
+	}
+}
+
 func TestFailedJudgeKeepsCoordinatorFindings(t *testing.T) {
 	dir, base, _ := testRepo(t)
 	runner := &fakeRunner{outputs: map[string]string{RoleCoordinator: coordinatorOutput(dir, dropped), RoleJudge: "not json"}}

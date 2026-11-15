@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +36,13 @@ func Run(ctx context.Context, cfg Config, opts Options) (*Result, error) {
 	if cfg.RepoDir == "" || cfg.BaseSHA == "" {
 		return nil, errors.New("review: RepoDir and BaseSHA are required")
 	}
+	// Reviewers report absolute file paths, and relativePath can only relate
+	// them to an absolute RepoDir: with "." every finding was dropped.
+	repoDir, err := filepath.Abs(cfg.RepoDir)
+	if err != nil {
+		return nil, fmt.Errorf("review: resolve repo dir: %w", err)
+	}
+	cfg.RepoDir = repoDir
 	head, err := gitOutput(ctx, cfg.RepoDir, "rev-parse", orDefault(cfg.HeadSHA, "HEAD"))
 	if err != nil {
 		return nil, fmt.Errorf("review: resolve head: %w", err)
